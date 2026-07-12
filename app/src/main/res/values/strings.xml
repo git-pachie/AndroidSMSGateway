@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Android SMS Gateway</string>
+    <string name="notification_channel_gateway">Gateway service</string>
+    <string name="notification_channel_gateway_description">Foreground notification for the SMS gateway service.</string>
+</resources>

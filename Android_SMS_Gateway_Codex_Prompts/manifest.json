@@ -1,0 +1,138 @@
+{
+  "package": "Android SMS Gateway Codex Prompt Pack",
+  "instructions": "Run every markdown prompt in exact filename order. Finish and build each part before continuing.",
+  "maximum_lines_per_script": 300,
+  "files": [
+    {
+      "name": "00_README_FIRST.md",
+      "lines": 42,
+      "source": "README"
+    },
+    {
+      "name": "01_PROJECT_FOUNDATION_PART_A.md",
+      "lines": 262,
+      "source": "01_PROJECT_FOUNDATION.md",
+      "part": 1,
+      "parts": 2
+    },
+    {
+      "name": "01_PROJECT_FOUNDATION_PART_B.md",
+      "lines": 39,
+      "source": "01_PROJECT_FOUNDATION.md",
+      "part": 2,
+      "parts": 2
+    },
+    {
+      "name": "02_DATABASE_AND_SECURITY_PART_A.md",
+      "lines": 241,
+      "source": "02_DATABASE_AND_SECURITY.md",
+      "part": 1,
+      "parts": 2
+    },
+    {
+      "name": "02_DATABASE_AND_SECURITY_PART_B.md",
+      "lines": 107,
+      "source": "02_DATABASE_AND_SECURITY.md",
+      "part": 2,
+      "parts": 2
+    },
+    {
+      "name": "03_HTTP_SERVER_AND_API_CORE_PART_A.md",
+      "lines": 266,
+      "source": "03_HTTP_SERVER_AND_API_CORE.md",
+      "part": 1,
+      "parts": 2
+    },
+    {
+      "name": "03_HTTP_SERVER_AND_API_CORE_PART_B.md",
+      "lines": 85,
+      "source": "03_HTTP_SERVER_AND_API_CORE.md",
+      "part": 2,
+      "parts": 2
+    },
+    {
+      "name": "04_OUTGOING_SMS_PART_A.md",
+      "lines": 261,
+      "source": "04_OUTGOING_SMS.md",
+      "part": 1,
+      "parts": 2
+    },
+    {
+      "name": "04_OUTGOING_SMS_PART_B.md",
+      "lines": 65,
+      "source": "04_OUTGOING_SMS.md",
+      "part": 2,
+      "parts": 2
+    },
+    {
+      "name": "05_INCOMING_SMS.md",
+      "lines": 264,
+      "source": "05_INCOMING_SMS.md",
+      "part": 1,
+      "parts": 1
+    },
+    {
+      "name": "06_WEBHOOK_AND_RETRY_PART_A.md",
+      "lines": 263,
+      "source": "06_WEBHOOK_AND_RETRY.md",
+      "part": 1,
+      "parts": 2
+    },
+    {
+      "name": "06_WEBHOOK_AND_RETRY_PART_B.md",
+      "lines": 57,
+      "source": "06_WEBHOOK_AND_RETRY.md",
+      "part": 2,
+      "parts": 2
+    },
+    {
+      "name": "07_COMPOSE_UI_DASHBOARD_MESSAGES_PART_A.md",
+      "lines": 266,
+      "source": "07_COMPOSE_UI_DASHBOARD_MESSAGES.md",
+      "part": 1,
+      "parts": 2
+    },
+    {
+      "name": "07_COMPOSE_UI_DASHBOARD_MESSAGES_PART_B.md",
+      "lines": 67,
+      "source": "07_COMPOSE_UI_DASHBOARD_MESSAGES.md",
+      "part": 2,
+      "parts": 2
+    },
+    {
+      "name": "08_SETTINGS_LOGS_AND_OPERATIONS_PART_A.md",
+      "lines": 265,
+      "source": "08_SETTINGS_LOGS_AND_OPERATIONS.md",
+      "part": 1,
+      "parts": 2
+    },
+    {
+      "name": "08_SETTINGS_LOGS_AND_OPERATIONS_PART_B.md",
+      "lines": 51,
+      "source": "08_SETTINGS_LOGS_AND_OPERATIONS.md",
+      "part": 2,
+      "parts": 2
+    },
+    {
+      "name": "09_TESTING_HARDENING_DOCUMENTATION_PART_A.md",
+      "lines": 254,
+      "source": "09_TESTING_HARDENING_DOCUMENTATION.md",
+      "part": 1,
+      "parts": 2
+    },
+    {
+      "name": "09_TESTING_HARDENING_DOCUMENTATION_PART_B.md",
+      "lines": 134,
+      "source": "09_TESTING_HARDENING_DOCUMENTATION.md",
+      "part": 2,
+      "parts": 2
+    },
+    {
+      "name": "10_FINAL_AUDIT_AND_RELEASE.md",
+      "lines": 253,
+      "source": "10_FINAL_AUDIT_AND_RELEASE.md",
+      "part": 1,
+      "parts": 1
+    }
+  ]
+}
