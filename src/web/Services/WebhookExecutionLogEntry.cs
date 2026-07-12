@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Web.Services;
 
 public sealed record WebhookExecutionLogEntry(
@@ -11,4 +13,5 @@ public sealed record WebhookExecutionLogEntry(
     bool AuthorizationRequired,
     bool Authorized,
     IReadOnlyDictionary<string, string> Headers,
-    string Body);
+    JsonElement? Body,
+    string? BodyText);

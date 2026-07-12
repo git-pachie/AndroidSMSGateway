@@ -15,10 +15,10 @@ Android SMS Gateway is an Android app that exposes SMS gateway capabilities from
 
 ## Repository Layout
 
-- `app/` Android application source, resources, tests, and Room schemas
-- `Docs/` project documentation
-- `Android_SMS_Gateway_Codex_Prompts/` implementation and planning prompts
-- `gradle/` Gradle version catalog and wrapper files
+- `src/mobile/android/` Android application source, resources, tests, and Gradle files
+- `src/web/` .NET 9 webhook receiver API with Swagger, text logging, and SQLite logging
+- `src/mobile/android/Docs/` Android project documentation
+- `src/mobile/android/Android_SMS_Gateway_Codex_Prompts/` implementation and planning prompts
 
 ## Requirements
 
@@ -39,6 +39,110 @@ Run unit tests with:
 ```bash
 ./gradlew testDebugUnitTest
 ```
+
+The Android project also supports the compatibility task path used by older tooling:
+
+```bash
+./gradlew :app:assembleDebug
+```
+
+## Webhook API
+
+Run the webhook receiver from the repository root:
+
+```bash
+cd src/web
+dotnet run
+```
+
+Default endpoints:
+
+- Health: `http://YOUR_COMPUTER_IP:5111/health`
+- Swagger UI: `http://YOUR_COMPUTER_IP:5111/swagger`
+- Webhook receiver: `http://YOUR_COMPUTER_IP:5111/webhook`
+
+Webhook logging outputs:
+
+- Text log: `src/web/logs/webhook-executions.log`
+- SQLite database: `src/web/logs/webhook-executions.db`
+
+Webhook receiver configuration lives in `src/web/appsettings.json`:
+
+- `Server:Urls`
+  Sets the bind address. Default is `http://0.0.0.0:5111`.
+- `Webhook:ExpectedBearerToken`
+  Shared secret expected from the Android app as `Authorization: Bearer ...`.
+- `Webhook:LogFilePath`
+  Text log file path.
+- `Webhook:DatabasePath`
+  SQLite database path.
+
+## Android API And Webhook Setup
+
+Assumptions:
+
+- Android phone API: `http://PHONE_IP:8080`
+- Webhook receiver API: `http://COMPUTER_IP:5111`
+
+1. Start the Android gateway service on the phone.
+2. Start the .NET webhook receiver with `dotnet run`.
+3. If you want to use plain HTTP on the LAN, disable HTTPS-only webhook validation:
+
+```bash
+curl -X PUT "http://PHONE_IP:8080/api/settings" \
+  -H "Authorization: Bearer YOUR_ANDROID_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "requireHttpsWebhook": false
+  }'
+```
+
+4. Configure the webhook URL and secret in the Android gateway:
+
+```bash
+curl -X POST "http://PHONE_IP:8080/api/settings/webhook" \
+  -H "Authorization: Bearer YOUR_ANDROID_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "webhookUrl": "http://COMPUTER_IP:5111/webhook",
+    "enabled": true,
+    "webhookSecret": "sms-gateway-test-secret"
+  }'
+```
+
+5. Put the same secret into `src/web/appsettings.json`:
+
+```json
+"Webhook": {
+  "LogFilePath": "logs/webhook-executions.log",
+  "DatabasePath": "logs/webhook-executions.db",
+  "ExpectedBearerToken": "sms-gateway-test-secret"
+}
+```
+
+6. Restart the webhook API after changing `appsettings.json`.
+7. Verify Android settings:
+
+```bash
+curl -H "Authorization: Bearer YOUR_ANDROID_API_KEY" \
+  "http://PHONE_IP:8080/api/settings"
+```
+
+8. Trigger a webhook test from Android:
+
+```bash
+curl -X POST "http://PHONE_IP:8080/api/webhook/test" \
+  -H "Authorization: Bearer YOUR_ANDROID_API_KEY"
+```
+
+The Android app currently sends webhook events for:
+
+- Incoming SMS: `sms.received`
+- Webhook test: `sms.gateway.test`
+- Outgoing accepted/pending: `sms.outgoing.pending`
+- Outgoing sent: `sms.outgoing.sent`
+- Outgoing failed: `sms.outgoing.failed`
+- Outgoing delivered: `sms.outgoing.delivered`
 
 ## Android Permissions
 

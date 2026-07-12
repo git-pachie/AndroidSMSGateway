@@ -46,6 +46,20 @@ app.MapPost("/webhook", async (
     var authorizationRequired = !string.IsNullOrWhiteSpace(expectedToken);
     var authorized = !authorizationRequired || string.Equals(authHeader, $"Bearer {expectedToken}", StringComparison.Ordinal);
     var requestId = context.Request.Headers["X-Request-ID"].ToString();
+    JsonElement? parsedBody = null;
+    string? bodyText = null;
+
+    if (!string.IsNullOrWhiteSpace(body))
+    {
+        try
+        {
+            parsedBody = JsonSerializer.Deserialize<JsonElement>(body);
+        }
+        catch (JsonException)
+        {
+            bodyText = body;
+        }
+    }
 
     await logger.LogAsync(new WebhookExecutionLogEntry(
         OccurredAtUtc: requestTime,
@@ -60,7 +74,8 @@ app.MapPost("/webhook", async (
         Headers: context.Request.Headers.ToDictionary(
             pair => pair.Key,
             pair => pair.Value.ToString()),
-        Body: body));
+        Body: parsedBody,
+        BodyText: bodyText));
 
     if (!authorized)
     {
@@ -68,13 +83,15 @@ app.MapPost("/webhook", async (
     }
 
     object payload;
-    try
+    if (parsedBody is JsonElement jsonBody)
     {
-        payload = string.IsNullOrWhiteSpace(body)
-            ? new { }
-            : JsonSerializer.Deserialize<JsonElement>(body);
+        payload = jsonBody;
     }
-    catch (JsonException)
+    else if (string.IsNullOrWhiteSpace(body))
+    {
+        payload = new { };
+    }
+    else
     {
         return Results.BadRequest(new
         {

@@ -6,5 +6,7 @@ public sealed class WebhookOptions
 
     public string LogFilePath { get; set; } = "logs/webhook-executions.log";
 
+    public string DatabasePath { get; set; } = "logs/webhook-executions.db";
+
     public string? ExpectedBearerToken { get; set; }
 }
