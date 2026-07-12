@@ -53,6 +53,7 @@ data class SafeSettingsResponse(
     val dailySmsLimit: Int,
     val maxRetryCount: Int,
     val retryBaseDelaySeconds: Int,
+    val effectiveRetryBaseDelaySeconds: Int,
     val autoStartEnabled: Boolean,
     val requireHttpsWebhook: Boolean,
 )
@@ -123,6 +124,139 @@ data class AuditLogDto(
     val durationMs: Long,
     val authenticated: Boolean,
     val createdAt: Long,
+)
+
+@Serializable
+data class SendSmsRequest(
+    val to: String,
+    val message: String,
+    val clientReference: String? = null,
+    val subscriptionId: Int? = null,
+)
+
+@Serializable
+data class AcceptedSmsResponse(
+    val messageId: Long,
+    val status: String,
+    val to: String,
+    val clientReference: String? = null,
+    val createdAt: String,
+)
+
+@Serializable
+data class SentSmsStatusResponse(
+    val messageId: Long,
+    val to: String,
+    val message: String,
+    val status: String,
+    val createdAt: String,
+    val sendingAt: String?,
+    val sentAt: String?,
+    val deliveredAt: String?,
+    val failedAt: String?,
+    val clientReference: String?,
+    val segmentCount: Int,
+    val subscriptionId: Int?,
+    val simSlot: Int?,
+    val errorCode: String?,
+    val errorMessage: String?,
+)
+
+@Serializable
+data class SentSmsListItemResponse(
+    val messageId: Long,
+    val to: String,
+    val status: String,
+    val createdAt: String,
+    val sentAt: String?,
+    val deliveredAt: String?,
+    val failedAt: String?,
+    val clientReference: String?,
+    val segmentCount: Int,
+    val subscriptionId: Int?,
+    val simSlot: Int?,
+    val errorCode: String?,
+)
+
+@Serializable
+data class ReceivedSmsListItemResponse(
+    val smsId: Long,
+    val from: String,
+    val message: String,
+    val receivedAt: String,
+    val subscriptionId: Int?,
+    val simSlot: Int?,
+    val forwardStatus: String,
+    val retryCount: Int,
+    val lastForwardAttemptAt: String?,
+    val nextRetryAt: String?,
+    val webhookResponseCode: Int?,
+    val errorCode: String?,
+    val errorMessage: String?,
+)
+
+@Serializable
+data class ReceivedSmsDetailResponse(
+    val smsId: Long,
+    val from: String,
+    val message: String,
+    val receivedAt: String,
+    val subscriptionId: Int?,
+    val simSlot: Int?,
+    val forwardStatus: String,
+    val retryCount: Int,
+    val lastForwardAttemptAt: String?,
+    val nextRetryAt: String?,
+    val webhookResponseCode: Int?,
+    val webhookResponseBody: String?,
+    val errorCode: String?,
+    val errorMessage: String?,
+    val attempts: List<WebhookAttemptSummaryResponse>,
+)
+
+@Serializable
+data class WebhookAttemptResponse(
+    val attemptId: Long,
+    val smsId: Long,
+    val attemptNumber: Int,
+    val requestUrlSummary: String,
+    val responseCode: Int?,
+    val responseBodySummary: String?,
+    val durationMs: Long?,
+    val success: Boolean,
+    val errorCode: String?,
+    val errorMessage: String?,
+    val attemptedAt: String,
+)
+
+@Serializable
+data class WebhookAttemptSummaryResponse(
+    val attemptId: Long,
+    val attemptNumber: Int,
+    val responseCode: Int?,
+    val success: Boolean,
+    val durationMs: Long?,
+    val errorCode: String?,
+    val attemptedAt: String,
+)
+
+@Serializable
+data class WebhookTestResponse(
+    val success: Boolean,
+    val responseCode: Int?,
+    val durationMs: Long,
+    val responseBodySummary: String?,
+    val errorCode: String?,
+    val errorMessage: String?,
+)
+
+@Serializable
+data class WebhookRetryAcceptedResponse(
+    val smsId: Long,
+    val forwardStatus: String,
+    val retryCount: Int,
+    val nextRetryAt: String?,
+    val scheduled: Boolean,
 )
 
 @Serializable

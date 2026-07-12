@@ -18,6 +18,12 @@ interface SentSmsDao {
     @Query("SELECT * FROM sent_sms WHERE id = :id")
     suspend fun getById(id: Long): SentSmsEntity?
 
+    @Query("SELECT * FROM sent_sms WHERE id = :id")
+    fun observeById(id: Long): Flow<SentSmsEntity?>
+
+    @Query("SELECT * FROM sent_sms WHERE clientReference = :clientReference ORDER BY createdAt DESC LIMIT 1")
+    suspend fun getLatestByClientReference(clientReference: String): SentSmsEntity?
+
     @Query("SELECT COUNT(*) FROM sent_sms WHERE status = :status")
     fun countByStatus(status: String): Flow<Int>
 
@@ -48,4 +54,22 @@ interface SentSmsDao {
         offset: Int,
         sortDirection: String,
     ): List<SentSmsEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM sent_sms
+        WHERE (:status IS NULL OR status = :status)
+          AND (:to IS NULL OR toNumber LIKE '%' || :to || '%')
+          AND (:clientReference IS NULL OR clientReference = :clientReference)
+          AND (:dateFrom IS NULL OR createdAt >= :dateFrom)
+          AND (:dateTo IS NULL OR createdAt <= :dateTo)
+        """,
+    )
+    suspend fun countFiltered(
+        status: String?,
+        to: String?,
+        clientReference: String?,
+        dateFrom: Long?,
+        dateTo: Long?,
+    ): Int
 }

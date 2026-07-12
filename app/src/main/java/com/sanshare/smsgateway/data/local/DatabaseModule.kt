@@ -6,6 +6,7 @@ import com.sanshare.smsgateway.data.local.dao.ReceivedSmsDao
 import com.sanshare.smsgateway.data.local.dao.RequestAuditLogDao
 import com.sanshare.smsgateway.data.local.dao.SentSmsDao
 import com.sanshare.smsgateway.data.local.dao.SettingsDao
+import com.sanshare.smsgateway.data.local.dao.SmsSegmentDao
 import com.sanshare.smsgateway.data.local.dao.SystemLogDao
 import com.sanshare.smsgateway.data.local.dao.WebhookAttemptDao
 import dagger.Module
@@ -22,10 +23,12 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase {
         return Room.databaseBuilder(context, AppDatabase::class.java, "sms_gateway.db")
+            .addMigrations(DatabaseMigrations.MIGRATION_1_2)
             .build()
     }
 
     @Provides fun provideSentSmsDao(database: AppDatabase): SentSmsDao = database.sentSmsDao()
+    @Provides fun provideSmsSegmentDao(database: AppDatabase): SmsSegmentDao = database.smsSegmentDao()
     @Provides fun provideReceivedSmsDao(database: AppDatabase): ReceivedSmsDao = database.receivedSmsDao()
     @Provides fun provideSettingsDao(database: AppDatabase): SettingsDao = database.settingsDao()
     @Provides fun provideSystemLogDao(database: AppDatabase): SystemLogDao = database.systemLogDao()

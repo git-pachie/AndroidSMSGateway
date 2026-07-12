@@ -2,16 +2,28 @@ package com.sanshare.smsgateway.http
 
 import android.content.Context
 import com.sanshare.smsgateway.BuildConfig
+import com.sanshare.smsgateway.core.error.AppError
 import com.sanshare.smsgateway.core.error.ErrorCode
 import com.sanshare.smsgateway.core.logging.AppLogger
+import com.sanshare.smsgateway.core.result.AppResult
 import com.sanshare.smsgateway.core.validation.GatewayValidators
 import com.sanshare.smsgateway.core.validation.PagingRequest
 import com.sanshare.smsgateway.data.local.dao.RequestAuditLogDao
 import com.sanshare.smsgateway.data.local.dao.SystemLogDao
 import com.sanshare.smsgateway.data.local.entity.RequestAuditLogEntity
+import com.sanshare.smsgateway.domain.model.IncomingSmsForwardStatus
+import com.sanshare.smsgateway.domain.repository.ReceivedSmsQuery
 import com.sanshare.smsgateway.domain.repository.ReceivedSmsRepository
+import com.sanshare.smsgateway.domain.repository.SentSmsQuery
+import com.sanshare.smsgateway.domain.repository.SentSmsRepository
 import com.sanshare.smsgateway.domain.repository.SettingsRepository
 import com.sanshare.smsgateway.domain.repository.SettingsUpdate
+import com.sanshare.smsgateway.domain.repository.WebhookAttemptQuery
+import com.sanshare.smsgateway.domain.repository.WebhookAttemptRepository
+import com.sanshare.smsgateway.domain.usecase.RunWebhookTestUseCase
+import com.sanshare.smsgateway.domain.usecase.SendSmsCommand
+import com.sanshare.smsgateway.domain.usecase.SendSmsUseCase
+import com.sanshare.smsgateway.sms.WebhookScheduler
 import com.sanshare.smsgateway.util.PermissionUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.ktor.http.HttpStatusCode
@@ -19,9 +31,11 @@ import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
-import io.ktor.server.engine.ApplicationEngine
+import io.ktor.server.application.install
+import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.server.netty.NettyApplicationEngine
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
@@ -33,12 +47,14 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.net.BindException
 import java.time.Instant
+import java.time.format.DateTimeParseException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -47,12 +63,17 @@ class GatewayHttpServer @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsRepository: SettingsRepository,
     private val receivedSmsRepository: ReceivedSmsRepository,
+    private val sentSmsRepository: SentSmsRepository,
+    private val webhookAttemptRepository: WebhookAttemptRepository,
+    private val sendSmsUseCase: SendSmsUseCase,
+    private val runWebhookTestUseCase: RunWebhookTestUseCase,
+    private val webhookScheduler: WebhookScheduler,
     private val systemLogDao: SystemLogDao,
     private val auditLogDao: RequestAuditLogDao,
     private val logger: AppLogger,
 ) {
     private val mutex = Mutex()
-    private var engine: ApplicationEngine? = null
+    private var engine: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private var boundPort: Int? = null
 
     suspend fun start(port: Int) = mutex.withLock {
@@ -108,7 +129,7 @@ class GatewayHttpServer @Inject constructor(
                             batteryOptimizationDisabled = permissions.batteryOptimizationIgnored,
                             simAvailable = null,
                             webhookEnabled = settings.webhookEnabled,
-                            pendingWebhookCount = kotlinx.coroutines.flow.first(pending),
+                            pendingWebhookCount = pending.first(),
                         ),
                     )
                 }
@@ -127,6 +148,8 @@ class GatewayHttpServer @Inject constructor(
                             deviceId = request.deviceId,
                             webhookUrl = request.webhookUrl,
                             webhookEnabled = request.webhookEnabled,
+                            webhookSecret = null,
+                            clearWebhookSecret = false,
                             allowedPrefixes = request.allowedPrefixes,
                             rateLimitPerMinute = request.rateLimitPerMinute,
                             dailySmsLimitEnabled = request.dailySmsLimitEnabled,
@@ -150,10 +173,74 @@ class GatewayHttpServer @Inject constructor(
                         SettingsUpdate(
                             webhookUrl = request.webhookUrl,
                             webhookEnabled = request.enabled,
+                            webhookSecret = request.webhookSecret,
+                            clearWebhookSecret = request.clearWebhookSecret,
                             maxRetryCount = request.maxRetryCount,
                         ),
                     )
                     call.respondSuccess(updated.toSafeResponse())
+                }
+            }
+            post("/api/webhook/test") {
+                handle(call) {
+                    call.respondSuccess(runWebhookTestUseCase().toWebhookTestResponse())
+                }
+            }
+            post("/api/webhook/retry/{smsId}") {
+                handle(call) {
+                    val smsId = call.parameters["smsId"]?.toLongOrNull()
+                        ?: throw GatewayServerException(ErrorCode.INVALID_REQUEST, "Invalid SMS ID")
+                    val entity = receivedSmsRepository.getById(smsId)
+                        ?: throw GatewayServerException(ErrorCode.RECORD_NOT_FOUND, "Inbox record not found")
+                    if (entity.forwardStatus == IncomingSmsForwardStatus.FORWARDED) {
+                        throw GatewayServerException(ErrorCode.INVALID_REQUEST, "Already forwarded", HttpStatusCode.Conflict)
+                    }
+                    val scheduled = webhookScheduler.scheduleReceivedSms(smsId, replaceExisting = true)
+                    val refreshed = receivedSmsRepository.getById(smsId) ?: entity
+                    call.respond(
+                        HttpStatusCode.Accepted,
+                        ApiSuccess(
+                            data = WebhookRetryAcceptedResponse(
+                                smsId = smsId,
+                                forwardStatus = refreshed.forwardStatus,
+                                retryCount = refreshed.retryCount,
+                                nextRetryAt = refreshed.nextRetryAt?.let { Instant.ofEpochMilli(it).toString() },
+                                scheduled = scheduled,
+                            ),
+                        ),
+                    )
+                }
+            }
+            get("/api/webhook/attempts") {
+                handle(call) {
+                    val paging = parsePaging(call)
+                    val smsId = call.request.queryParameters["smsId"]?.toLongOrNull()
+                    val success = call.request.queryParameters["success"]?.toBooleanStrictOrNull()
+                    val responseCode = call.request.queryParameters["responseCode"]?.toIntOrNull()
+                    val dateFrom = parseInstantQuery(call.request.queryParameters["dateFrom"], "dateFrom")
+                    val dateTo = parseInstantQuery(call.request.queryParameters["dateTo"], "dateTo")
+                    val sort = sortDirection(call)
+                    val page = webhookAttemptRepository.query(
+                        WebhookAttemptQuery(
+                            smsId = smsId,
+                            success = success,
+                            responseCode = responseCode,
+                            dateFrom = dateFrom,
+                            dateTo = dateTo,
+                            limit = paging.limit,
+                            offset = paging.offset,
+                            sortDirection = sort,
+                        ),
+                    )
+                    call.respondSuccess(
+                        PagedResponse(
+                            items = page.items.map { it.toResponse() },
+                            limit = paging.limit,
+                            offset = paging.offset,
+                            returned = page.items.size,
+                            total = page.total,
+                        ),
+                    )
                 }
             }
             put("/api/settings/server") {
@@ -185,10 +272,109 @@ class GatewayHttpServer @Inject constructor(
                     call.respondSuccess(PagedResponse(items.map { it.toDto() }, paging.limit, paging.offset, items.size, total))
                 }
             }
-            post("/api/sms/send") { notReady(call, "send_sms") }
-            get("/api/sms/status/{messageId}") { notReady(call, "sms_status") }
-            get("/api/sms/sent") { notReady(call, "sent_sms") }
-            get("/api/sms/inbox") { notReady(call, "sms_inbox") }
+            post("/api/sms/send") {
+                handle(call) {
+                    val request = call.receive<SendSmsRequest>()
+                    when (val result = sendSmsUseCase(
+                        SendSmsCommand(
+                            to = request.to,
+                            message = request.message,
+                            clientReference = request.clientReference,
+                            subscriptionId = request.subscriptionId,
+                            remoteAddress = call.request.local.remoteHost,
+                        ),
+                    )) {
+                        is AppResult.Success -> call.respond(HttpStatusCode.Accepted, ApiSuccess(data = result.value.toResponse()))
+                        is AppResult.Failure -> {
+                            if (result.error.code == ErrorCode.RATE_LIMIT_EXCEEDED) {
+                                result.error.details?.toLongOrNull()?.let { call.response.header("Retry-After", it.toString()) }
+                            }
+                            throw result.error.toGatewayException()
+                        }
+                    }
+                }
+            }
+            get("/api/sms/status/{messageId}") {
+                handle(call) {
+                    val messageId = call.parameters["messageId"]?.toLongOrNull()
+                        ?: throw GatewayServerException(ErrorCode.INVALID_REQUEST, "Invalid message ID")
+                    val entity = sentSmsRepository.getById(messageId)
+                        ?: throw GatewayServerException(ErrorCode.RECORD_NOT_FOUND, "Message not found")
+                    call.respondSuccess(entity.toStatusResponse())
+                }
+            }
+            get("/api/sms/sent") {
+                handle(call) {
+                    val paging = parsePaging(call)
+                    val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }
+                    val to = call.request.queryParameters["to"]?.takeIf { it.isNotBlank() }
+                    val clientReference = call.request.queryParameters["clientReference"]?.takeIf { it.isNotBlank() }
+                    val dateFrom = parseInstantQuery(call.request.queryParameters["dateFrom"], "dateFrom")
+                    val dateTo = parseInstantQuery(call.request.queryParameters["dateTo"], "dateTo")
+                    val sort = sortDirection(call)
+                    val page = sentSmsRepository.query(
+                        SentSmsQuery(
+                            status = status,
+                            to = to,
+                            clientReference = clientReference,
+                            dateFrom = dateFrom,
+                            dateTo = dateTo,
+                            limit = paging.limit,
+                            offset = paging.offset,
+                            sortDirection = sort,
+                        ),
+                    )
+                    call.respondSuccess(
+                        PagedResponse(
+                            items = page.items.map { it.toListItemResponse() },
+                            limit = paging.limit,
+                            offset = paging.offset,
+                            returned = page.items.size,
+                            total = page.total,
+                        ),
+                    )
+                }
+            }
+            get("/api/sms/inbox") {
+                handle(call) {
+                    val paging = parsePaging(call)
+                    val from = call.request.queryParameters["from"]?.takeIf { it.isNotBlank() }
+                    val forwardStatus = call.request.queryParameters["forwardStatus"]?.takeIf { it.isNotBlank() }
+                    val dateFrom = parseInstantQuery(call.request.queryParameters["dateFrom"], "dateFrom")
+                    val dateTo = parseInstantQuery(call.request.queryParameters["dateTo"], "dateTo")
+                    val sort = sortDirection(call)
+                    val page = receivedSmsRepository.query(
+                        ReceivedSmsQuery(
+                            from = from,
+                            forwardStatus = forwardStatus,
+                            dateFrom = dateFrom,
+                            dateTo = dateTo,
+                            limit = paging.limit,
+                            offset = paging.offset,
+                            sortDirection = sort,
+                        ),
+                    )
+                    call.respondSuccess(
+                        PagedResponse(
+                            items = page.items.map { it.toListItemResponse() },
+                            limit = paging.limit,
+                            offset = paging.offset,
+                            returned = page.items.size,
+                            total = page.total,
+                        ),
+                    )
+                }
+            }
+            get("/api/sms/inbox/{smsId}") {
+                handle(call) {
+                    val smsId = call.parameters["smsId"]?.toLongOrNull()
+                        ?: throw GatewayServerException(ErrorCode.INVALID_REQUEST, "Invalid SMS ID")
+                    val entity = receivedSmsRepository.getById(smsId)
+                        ?: throw GatewayServerException(ErrorCode.RECORD_NOT_FOUND, "Inbox record not found")
+                    val attempts = webhookAttemptRepository.listBySmsId(smsId, limit = 20)
+                    call.respondSuccess(entity.toDetailResponse(attempts))
+                }
+            }
         }
     }
 
@@ -278,6 +464,15 @@ class GatewayHttpServer @Inject constructor(
         return if (call.request.queryParameters["sortDirection"]?.uppercase() == "ASC") "ASC" else "DESC"
     }
 
+    private fun parseInstantQuery(raw: String?, label: String): Long? {
+        if (raw.isNullOrBlank()) return null
+        return try {
+            Instant.parse(raw).toEpochMilli()
+        } catch (_: DateTimeParseException) {
+            throw GatewayServerException(ErrorCode.INVALID_REQUEST, "$label must be an ISO-8601 timestamp")
+        }
+    }
+
     private suspend fun <T> ApplicationCall.respondSuccess(data: T) {
         respond(ApiSuccess(data = data))
     }
@@ -299,6 +494,10 @@ class GatewayHttpServer @Inject constructor(
     }
 }
 
+private fun AppError.toGatewayException(): GatewayServerException {
+    return GatewayServerException(code = code, safeMessage = message, status = statusFor(code))
+}
+
 class GatewayServerException(
     val code: ErrorCode,
     val safeMessage: String,
@@ -312,7 +511,14 @@ private fun statusFor(code: ErrorCode): HttpStatusCode {
         -> HttpStatusCode.Unauthorized
         ErrorCode.RECORD_NOT_FOUND -> HttpStatusCode.NotFound
         ErrorCode.PORT_IN_USE -> HttpStatusCode.Conflict
+        ErrorCode.RATE_LIMIT_EXCEEDED,
+        ErrorCode.DAILY_SMS_LIMIT_EXCEEDED,
+        -> HttpStatusCode.TooManyRequests
         ErrorCode.SERVER_START_FAILED -> HttpStatusCode.ServiceUnavailable
+        ErrorCode.SMS_PERMISSION_DENIED,
+        ErrorCode.NO_SIM_AVAILABLE,
+        ErrorCode.SMS_NO_SERVICE,
+        -> HttpStatusCode.ServiceUnavailable
         ErrorCode.FEATURE_NOT_READY -> HttpStatusCode.NotImplemented
         else -> HttpStatusCode.BadRequest
     }

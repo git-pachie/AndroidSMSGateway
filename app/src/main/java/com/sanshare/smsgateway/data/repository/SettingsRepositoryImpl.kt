@@ -5,6 +5,7 @@ import com.sanshare.smsgateway.core.security.ApiKeyHasher
 import com.sanshare.smsgateway.core.validation.GatewayValidators
 import com.sanshare.smsgateway.data.local.dao.SettingsDao
 import com.sanshare.smsgateway.data.local.entity.AppSettingsEntity
+import com.sanshare.smsgateway.data.security.WebhookSecretProtector
 import com.sanshare.smsgateway.domain.model.AppSettings
 import com.sanshare.smsgateway.domain.repository.GeneratedApiKey
 import com.sanshare.smsgateway.domain.repository.SettingsRepository
@@ -17,6 +18,7 @@ import javax.inject.Singleton
 @Singleton
 class SettingsRepositoryImpl @Inject constructor(
     private val settingsDao: SettingsDao,
+    private val webhookSecretProtector: WebhookSecretProtector,
 ) : SettingsRepository {
     private val apiKeyHasher = ApiKeyHasher()
 
@@ -59,12 +61,34 @@ class SettingsRepositoryImpl @Inject constructor(
         return requireNotNull(settingsDao.getById()).toDomain()
     }
 
+    override suspend fun getWebhookSecret(): String? {
+        ensureInitialized()
+        return webhookSecretProtector.reveal(settingsDao.getById()?.webhookSecretEncrypted)
+    }
+
     override suspend fun updateSettings(update: SettingsUpdate): AppSettings {
         val current = requireNotNull(settingsDao.getById())
+        val webhookSecretReference = when {
+            update.clearWebhookSecret -> {
+                webhookSecretProtector.clear(current.webhookSecretEncrypted)
+                null
+            }
+            update.webhookSecret != null -> {
+                val trimmed = update.webhookSecret.trim()
+                if (trimmed.isBlank()) {
+                    current.webhookSecretEncrypted
+                } else {
+                    webhookSecretProtector.clear(current.webhookSecretEncrypted)
+                    webhookSecretProtector.protect(trimmed)
+                }
+            }
+            else -> current.webhookSecretEncrypted
+        }
         val updated = current.copy(
             deviceId = update.deviceId?.trim()?.takeIf { it.isNotBlank() } ?: current.deviceId,
             webhookUrl = update.webhookUrl ?: current.webhookUrl,
             webhookEnabled = update.webhookEnabled ?: current.webhookEnabled,
+            webhookSecretEncrypted = webhookSecretReference,
             allowedPrefixes = update.allowedPrefixes?.joinToString(",") ?: current.allowedPrefixes,
             rateLimitPerMinute = update.rateLimitPerMinute ?: current.rateLimitPerMinute,
             dailySmsLimitEnabled = update.dailySmsLimitEnabled ?: current.dailySmsLimitEnabled,
@@ -82,6 +106,13 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun updateServerPort(serverPort: Int): AppSettings {
         val current = requireNotNull(settingsDao.getById())
         val updated = current.copy(serverPort = serverPort, updatedAt = System.currentTimeMillis())
+        settingsDao.update(updated)
+        return updated.toDomain()
+    }
+
+    override suspend fun setServerEnabled(enabled: Boolean): AppSettings {
+        val current = requireNotNull(settingsDao.getById())
+        val updated = current.copy(serverEnabled = enabled, updatedAt = System.currentTimeMillis())
         settingsDao.update(updated)
         return updated.toDomain()
     }
