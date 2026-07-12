@@ -1,5 +1,7 @@
 .gradle/
 **/.gradle/
+.kotlin/
+**/.kotlin/
 build/
 **/build/
 local.properties
@@ -10,6 +12,7 @@ local.properties
 captures/
 *.apk
 *.aab
+*.hprof
 **/bin/
 **/obj/
 src/web/logs/
