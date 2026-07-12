@@ -1,10 +1,15 @@
 .gradle/
-/build/
-/app/build/
+**/.gradle/
+build/
+**/build/
 local.properties
+**/local.properties
 *.iml
 .idea/
 .DS_Store
 captures/
 *.apk
 *.aab
+**/bin/
+**/obj/
+src/web/logs/
