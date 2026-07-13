@@ -1,8 +1,11 @@
 package com.sanshare.smsgateway.service
 
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.os.IBinder
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -12,6 +15,7 @@ import com.sanshare.smsgateway.core.network.NetworkAddressProvider
 import com.sanshare.smsgateway.domain.model.GatewayServiceState
 import com.sanshare.smsgateway.domain.repository.GatewayStateRepository
 import com.sanshare.smsgateway.domain.repository.SettingsRepository
+import com.sanshare.smsgateway.domain.usecase.RunLowBatteryWebhookUseCase
 import com.sanshare.smsgateway.http.GatewayHttpServer
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -29,15 +33,19 @@ class SmsGatewayService : Service() {
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var gatewayHttpServer: GatewayHttpServer
     @Inject lateinit var networkAddressProvider: NetworkAddressProvider
+    @Inject lateinit var runLowBatteryWebhookUseCase: RunLowBatteryWebhookUseCase
     @Inject lateinit var logger: AppLogger
 
     private val notificationFactory by lazy { GatewayNotificationFactory(this) }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val stateMutex = Mutex()
+    private var batteryReceiverRegistered = false
+    private var lowBatteryEventSent = false
 
     override fun onCreate() {
         super.onCreate()
         notificationFactory.ensureChannel()
+        registerBatteryReceiver()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -104,8 +112,66 @@ class SmsGatewayService : Service() {
     }
 
     override fun onDestroy() {
+        unregisterBatteryReceiver()
         serviceScope.cancel()
         super.onDestroy()
+    }
+
+    private fun registerBatteryReceiver() {
+        if (batteryReceiverRegistered) return
+        registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        batteryReceiverRegistered = true
+    }
+
+    private fun unregisterBatteryReceiver() {
+        if (!batteryReceiverRegistered) return
+        runCatching { unregisterReceiver(batteryReceiver) }
+        batteryReceiverRegistered = false
+    }
+
+    private val batteryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != Intent.ACTION_BATTERY_CHANGED) return
+            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+            if (level < 0 || scale <= 0) return
+
+            val percentage = ((level * 100f) / scale).toInt()
+            val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+            val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+            val isLowBattery = percentage <= LOW_BATTERY_THRESHOLD_PERCENT
+
+            if (!isLowBattery) {
+                lowBatteryEventSent = false
+                return
+            }
+            if (lowBatteryEventSent) return
+
+            lowBatteryEventSent = true
+            serviceScope.launch {
+                val result = runCatching {
+                    runLowBatteryWebhookUseCase(
+                        batteryPercentage = percentage,
+                        thresholdPercentage = LOW_BATTERY_THRESHOLD_PERCENT,
+                        isCharging = isCharging,
+                    )
+                }.onFailure {
+                    lowBatteryEventSent = false
+                    logger.error("Battery", "Low-battery webhook dispatch failed", it)
+                }.getOrNull() ?: return@launch
+
+                if (result.success) {
+                    logger.info("Battery", "Low-battery webhook sent at ${percentage}%")
+                } else {
+                    lowBatteryEventSent = false
+                    logger.warning(
+                        "Battery",
+                        "Low-battery webhook failed at ${percentage}% with ${result.errorCode ?: "unknown_error"}",
+                    )
+                }
+            }
+        }
     }
 
     private fun updateNotification(notification: android.app.Notification) {
@@ -115,6 +181,7 @@ class SmsGatewayService : Service() {
     companion object {
         private const val ACTION_START = "com.sanshare.smsgateway.action.START"
         private const val ACTION_STOP = "com.sanshare.smsgateway.action.STOP"
+        private const val LOW_BATTERY_THRESHOLD_PERCENT = 20
 
         fun startIntent(context: Context): Intent {
             return Intent(context, SmsGatewayService::class.java).setAction(ACTION_START)

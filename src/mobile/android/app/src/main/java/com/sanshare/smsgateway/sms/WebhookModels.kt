@@ -38,6 +38,16 @@ data class OutgoingSmsWebhookPayload(
     val errorMessage: String? = null,
 )
 
+@Serializable
+data class LowBatteryWebhookPayload(
+    val eventType: String,
+    val deviceId: String,
+    val batteryPercentage: Int,
+    val thresholdPercentage: Int,
+    val isCharging: Boolean,
+    val observedAt: String,
+)
+
 data class WebhookDispatchRequest(
     val eventType: String,
     val requestBody: String,
